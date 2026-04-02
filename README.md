@@ -138,16 +138,6 @@ pip install torch_geometric
 
 ### How to run
 
-torch 
-torch-geometric
-selfies 
-rdkit
-mordred
-pandas 
-numpy 
-scikit-learn
-openpyxl
-
 ```text
 python e2e_pipeline.py \
   --descriptor_file modified_skewness_filtered_data_updated_smile.xlsx \
