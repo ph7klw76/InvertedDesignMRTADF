@@ -1,4 +1,4 @@
-# Inverted Design Pipeline for Novel MRTADF design
+# Inverse Design Pipeline for Novel MRTADF design
 
 <img width="734" height="875" alt="image" src="https://github.com/user-attachments/assets/c9f59282-3888-4089-9a2b-bffc72649f7a" />
 
