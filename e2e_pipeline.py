@@ -96,7 +96,7 @@ E2E_CONFIG = {
     "n_generate": 1000,
     "n_samples_per_target": 10,
     "temperature": 0.8,
-    "top_k": 50,
+    "top_k": 0,
     "t1s1_target": 0.04,
     "t2s1_target": 0.05,
 

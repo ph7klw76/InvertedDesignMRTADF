@@ -491,9 +491,10 @@ class SELFIESConditionalVAE(nn.Module):
 
             logits = self.output_proj(decoded[:, -1, :]) / temperature
 
-            # Top-k filtering
-            if top_k > 0:
-                indices_to_remove = logits < torch.topk(logits, top_k)[0][:, -1:]
+            # Top-k filtering (clamp to vocab size)
+            effective_k = min(top_k, logits.size(-1)) if top_k > 0 else 0
+            if effective_k > 0:
+                indices_to_remove = logits < torch.topk(logits, effective_k)[0][:, -1:]
                 logits[indices_to_remove] = float('-inf')
 
             probs = F.softmax(logits, dim=-1)
@@ -736,7 +737,7 @@ class SELFIESVAETrainer:
     def generate_molecules(self, target_properties: np.ndarray,
                             n_samples: int = 10,
                             temperature: float = 0.8,
-                            top_k: int = 50) -> List[Optional[str]]:
+                            top_k: int = 0) -> List[Optional[str]]:
         """
         Generate SMILES strings for desired properties.
 
