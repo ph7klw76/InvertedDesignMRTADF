@@ -211,6 +211,9 @@ class CheckpointDB:
         """
         Reconstruct the full DataFrame from the checkpoint DB.
         Merges mordred + rdkit + padel data for each molecule.
+
+        NOTE: For large datasets (>50k molecules), use
+        export_chunked_csv() instead to avoid out-of-memory errors.
         """
         rows = self.conn.execute(
             "SELECT name, mordred_data, rdkit_data, padel_data FROM molecules"
@@ -237,6 +240,63 @@ class CheckpointDB:
         df = df[["Name"] + reference_columns].fillna(0.0)
 
         return df
+
+    def export_chunked_csv(self, reference_columns: List[str],
+                            output_csv: str, chunk_size: int = 5000) -> int:
+        """
+        Stream results from checkpoint DB to CSV in chunks.
+        Never holds more than chunk_size rows in memory.
+
+        This is the memory-safe alternative to load_all_results().
+
+        Returns: total number of rows written
+        """
+        import csv
+
+        header = ["Name"] + reference_columns
+        total = self.get_total_count()
+        written = 0
+
+        with open(output_csv, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+
+            cursor = self.conn.execute(
+                "SELECT name, mordred_data, rdkit_data, padel_data FROM molecules"
+            )
+
+            while True:
+                rows = cursor.fetchmany(chunk_size)
+                if not rows:
+                    break
+
+                for name, m_blob, r_blob, p_blob in rows:
+                    # Merge all descriptor blobs for this molecule
+                    merged = {}
+                    for blob in [m_blob, r_blob, p_blob]:
+                        if blob:
+                            try:
+                                data = json.loads(zlib.decompress(blob))
+                                merged.update(data)
+                            except Exception:
+                                pass
+
+                    # Build row aligned to reference columns
+                    csv_row = [name]
+                    for col in reference_columns:
+                        val = merged.get(col, 0.0)
+                        try:
+                            csv_row.append(float(val) if val and val == val else 0.0)
+                        except (ValueError, TypeError):
+                            csv_row.append(0.0)
+
+                    writer.writerow(csv_row)
+                    written += 1
+
+                # Flush every chunk
+                f.flush()
+
+        return written
 
     def get_progress_summary(self) -> Dict:
         """Get completion statistics."""
@@ -680,21 +740,21 @@ def run_padel_stage(db: CheckpointDB, logger,
 def export_results(db: CheckpointDB, reference_columns: List[str],
                    output_csv: str, logger):
     """
-    Reconstruct the final DataFrame from the checkpoint database
-    and write to CSV, aligned to the reference column order.
+    Export checkpoint DB to CSV using memory-safe chunked streaming.
+    Writes 5000 rows at a time — never loads full dataset into RAM.
     """
     logger.info(f"Exporting results to {output_csv}")
+    logger.info(f"  Using chunked export (memory-safe for large datasets)")
 
-    df = db.load_all_results(reference_columns)
-    df.to_csv(output_csv, index=False)
+    total = db.get_total_count()
+    logger.info(f"  Total molecules: {total:,}")
 
-    # Statistics
-    n_nonzero = (df.drop(columns=["Name"]) != 0).any(axis=0).sum()
-    logger.info(f"  Shape: {df.shape[0]} × {df.shape[1]}")
-    logger.info(f"  Non-zero columns: {n_nonzero}/{len(reference_columns)}")
+    n_written = db.export_chunked_csv(reference_columns, output_csv, chunk_size=5000)
+
+    logger.info(f"  Written: {n_written:,} rows × {len(reference_columns)} columns")
     logger.info(f"  Saved: {output_csv}")
 
-    return df
+    return None
 
 
 def export_partial(db: CheckpointDB, reference_columns: List[str],
@@ -852,7 +912,7 @@ def run_pipeline(
     logger.info(f"\n{'━'*65}")
     logger.info("  FINAL EXPORT")
     logger.info(f"{'━'*65}")
-    final_df = export_results(db, ref_columns, output_csv, logger)
+    export_results(db, ref_columns, output_csv, logger)
 
     # ── Summary ──
     elapsed = time.time() - t_start
@@ -871,7 +931,8 @@ def run_pipeline(
     logger.info(f"{'═'*65}")
 
     db.close()
-    return final_df
+    logger.info(f"Done! Output saved to: {output_csv}")
+    return output_csv
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -939,4 +1000,4 @@ if __name__ == "__main__":
         )
 
         if result is not None:
-            print(f"\nDone! Shape: {result.shape}")
+            print(f"\nDone! Output: {result}")
